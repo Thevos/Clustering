@@ -859,7 +859,7 @@ void Glut::drawVoxels()
 	vector<Reconstructor::Voxel*> voxels = m_Glut->getScene3d().getReconstructor().getVisibleVoxels();
 	for (size_t v = 0; v < voxels.size(); v++)
 	{
-		glColor4f((GLfloat) voxels[v]->color[0], (GLfloat)voxels[v]->color[1], (GLfloat)voxels[v]->color[2], 0.5f);
+		glColor4f((GLfloat) voxels[v]->color[0] / 255, (GLfloat)voxels[v]->color[1] / 255, (GLfloat)voxels[v]->color[2] / 255, 0.5f);
 		glVertex3f((GLfloat) voxels[v]->x, (GLfloat) voxels[v]->y, (GLfloat) voxels[v]->z);
 	}
 
@@ -945,10 +945,8 @@ void Glut::cluster() {
 	Mat points = Mat(values, true);
 	points.convertTo(points, CV_32F);
 	//Cluster the points using kmeans
-	kmeans(points, 4, bestLabels, TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 10, 1), 10, KMEANS_PP_CENTERS, centers);
+	kmeans(points, 4, bestLabels, TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 100, 1), 100, KMEANS_PP_CENTERS, centers);
 
-	vector<uchar> temp;
-	temp.assign(bestLabels.datastart, bestLabels.dataend);
 	vector<Reconstructor::Voxel*> labeledvoxels;
 	vector <tuple<Point, double>> occlusion;
 
@@ -961,6 +959,8 @@ void Glut::cluster() {
 		Mat mask = m_Glut->getScene3d().getCameras()[x]->getForegroundImage();
 		Mat image = m_Glut->getScene3d().getCameras()[x]->getFrame();
 		bitwise_and(image, image, mask = mask);
+
+		//Calculate occlusion
 		//for (int i = 0; i < voxels.size(); i++) {
 
 		//	//Calculates distance between a voxel and the camera
@@ -987,49 +987,85 @@ void Glut::cluster() {
 		//Color each voxel based on if it is or isnt occluded for a camera
 		for (int i = 0; i < voxels.size(); i++)
 		{
-			/*printf("Red value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2]);
-			printf("Green value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1]);
-			printf("Blue value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0]);*/
-
-		/*	voxels[i]->color[0] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2];
+			voxels[i]->color[0] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2];
 			voxels[i]->color[1] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1];
-			voxels[i]->color[2] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0];*/
+			voxels[i]->color[2] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0];
 
-			if (temp[i] != '0' /*&& voxels[i]->valid_camera_projection[x]*/)
-			{
-				//double distance = sqrt((voxels[i]->x - cameraLocation.x) * (voxels[i]->x - cameraLocation.x)) + ((voxels[i]->y - cameraLocation.y) * (voxels[i]->y - cameraLocation.y)) + ((voxels[i]->z - cameraLocation.z) * (voxels[i]->z - cameraLocation.z));
-				////Check if the current voxel is the closest voxel (determined in previous for loop)
-				//if (find(occlusion.begin(), occlusion.end(), tuple<Point, double>(voxels[i]->camera_projection[x], distance)) != occlusion.end())
-					voxels[i]->color[0] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2];
-					voxels[i]->color[1] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1];
-					voxels[i]->color[2] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0];
-			}
+
+			//if (temp[i] != '\0' /*&& voxels[i]->valid_camera_projection[x]*/)
+			//{
+			//	/*printf("Red value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2]);
+			//	printf("Green value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1]);
+			//	printf("Blue value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0]);*/
+
+			//	double distance = sqrt((voxels[i]->x - cameraLocation.x) * (voxels[i]->x - cameraLocation.x)) + ((voxels[i]->y - cameraLocation.y) * (voxels[i]->y - cameraLocation.y)) + ((voxels[i]->z - cameraLocation.z) * (voxels[i]->z - cameraLocation.z));
+			//	//Check if the current voxel is the closest voxel (determined in previous for loop)
+			//	if (find(occlusion.begin(), occlusion.end(), tuple<Point, double>(voxels[i]->camera_projection[x], distance)) != occlusion.end()) {
+			//		voxels[i]->color[0] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2];
+			//		voxels[i]->color[1] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1];
+			//		voxels[i]->color[2] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0];
+			//	}
+			//}
 		}
 	}
 	////Calculates the means of a label
-	//uint counter1 = 0;;
-	//uint counter2 = 0;
-	//uint counter3 = 0;
-	//unsigned char person1R = 0;
-	//unsigned char person1G = 0;
-	//unsigned char person1B = 0;
-	//for (int i = 0; i < voxels.size(); i++) {
-	//	if (temp[i] == '1') {
-	//		counter1++;
-	//		person1R += voxels[i]->color[0];
-	//		person1G += voxels[i]->color[1];
-	//		person1B += voxels[i]->color[2];
-	//	}
-	//}
-	////Turns voxel corresponding to one label into a single color
-	//for (int i = 0; i < voxels.size(); i++) {
-	//	if (temp[i] == '1') {
-	//		counter1++;
-	//		voxels[i]->color[0] = person1R / counter1;
-	//		voxels[i]->color[1] = person1G / counter1;;
-	//		voxels[i]->color[2] = person1B / counter1;;
-	//	}
-	//}
+	uint counter1 = 0;;
+	uint counter2 = 0;
+	uint counter3 = 0;
+	uint counter4 = 0;
+	Scalar person1 = { 0, 0, 0 };
+	Scalar person2 = { 0, 0, 0 };
+	Scalar person3 = { 0, 0, 0 };
+	Scalar person4 = { 0, 0, 0 };
+	for (int i = 0; i < voxels.size(); i++) {
+		if (bestLabels.at<uchar>(i, 0) == 0) {
+			counter1++;
+			person1[0] += voxels[i]->color[0];
+			person1[1] += voxels[i]->color[1];
+			person1[2] += voxels[i]->color[2];
+		}
+		if (bestLabels.at<uchar>(i, 0) == 1) {
+			counter2++;
+			person2[0] += voxels[i]->color[0];
+			person2[1] += voxels[i]->color[1];
+			person2[2] += voxels[i]->color[2];
+		}
+		if (bestLabels.at<uchar>(i, 0) == 2) {
+			counter3++;
+			person3[0] += voxels[i]->color[0];
+			person3[1] += voxels[i]->color[1];
+			person3[2] += voxels[i]->color[2];
+		}
+		if (bestLabels.at<uchar>(i, 0) == 3) {
+			counter4++;
+			person4[0] += voxels[i]->color[0];
+			person4[1] += voxels[i]->color[1];
+			person4[2] += voxels[i]->color[2];
+		}
+	}
+	//Turns voxel corresponding to one label into a single color
+	for (int i = 0; i < voxels.size(); i++) {
+		if (bestLabels.at<uchar>(i, 0) == 0) {
+			voxels[i]->color[0] = person1[0] / counter1;
+			voxels[i]->color[1] = person1[1] / counter1;;
+			voxels[i]->color[2] = person1[2] / counter1;;
+		}
+		if (bestLabels.at<uchar>(i, 0) == 1) {
+			voxels[i]->color[0] = person2[0] / counter2;
+			voxels[i]->color[1] = person2[1] / counter2;;
+			voxels[i]->color[2] = person2[2] / counter2;;
+		}
+		if (bestLabels.at<uchar>(i, 0) == 2) {
+			voxels[i]->color[0] = person3[0] / counter3;
+			voxels[i]->color[1] = person3[1] / counter3;;
+			voxels[i]->color[2] = person3[2] / counter3;;
+		}
+		if (bestLabels.at<uchar>(i, 0) == 3) {
+			voxels[i]->color[0] = person4[0] / counter4;
+			voxels[i]->color[1] = person4[1] / counter4;;
+			voxels[i]->color[2] = person4[2] / counter4;;
+		}
+	}
 	//Set the new (color) values of the voxels
 	m_Glut->getScene3d().getReconstructor().setVisibleVoxels(voxels);
 }
