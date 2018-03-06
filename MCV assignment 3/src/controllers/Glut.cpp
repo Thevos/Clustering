@@ -931,6 +931,8 @@ void Glut::drawInfo()
 #endif
 }
 
+//Clusters the voxels and makes them into color models
+//We tried to seperate the clustering and the color modeling but could not get it to work
 void Glut::cluster() {
 	vector<Reconstructor::Voxel*> voxels = m_Glut->getScene3d().getReconstructor().getVisibleVoxels();
 	vector<Point2f> values;
@@ -941,74 +943,63 @@ void Glut::cluster() {
 	{
 		values.push_back(Point2f(voxels[i]->x, voxels[i]->y));
 	}
-	//concert points to Mat type for kmeans
+	//Convert points to Mat type for kmeans
 	Mat points = Mat(values, true);
 	points.convertTo(points, CV_32F);
 	//Cluster the points using kmeans
-	kmeans(points, 4, bestLabels, TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 100, 1), 100, KMEANS_PP_CENTERS, centers);
+	kmeans(points, 4, bestLabels, TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 100, 1), 100, KMEANS_RANDOM_CENTERS, centers);
 
-	vector<Reconstructor::Voxel*> labeledvoxels;
-	vector <tuple<Point, double>> occlusion;
+	vector<bool> occluded(voxels.size());
+	vector<Point> projections(voxels.size());
+	vector<double> voxelDistance(voxels.size());
 
-	//Fills the list with a tuple of the pixel location and the minimum distance
-	//This is so we can check if a voxel is occluded by checking if its the closest voxel mapped to the pixel
-	//When the list is filled, it is used to check if a voxel is the closest and should receive color from the image
-	bool tupleFound = false;
 	for (int x = 0; x < 4; x++) {
+		//Basic operations that have to be done for each camera
+		//Such as getting the new location and masking the new camera image
+		//Also the array used further on are cleared to make sure no leftover variables are present
 		Point3f cameraLocation = m_Glut->getScene3d().getCameras()[x]->getCameraLocation();
 		Mat mask = m_Glut->getScene3d().getCameras()[x]->getForegroundImage();
 		Mat image = m_Glut->getScene3d().getCameras()[x]->getFrame();
 		bitwise_and(image, image, mask = mask);
+		voxelDistance.clear();
+		projections.clear();
+		occluded.clear();
 
-		//Calculate occlusion
-		//for (int i = 0; i < voxels.size(); i++) {
+		//Fills three arrays with values
+		//First array is the distance of a voxel to the camera
+		//Second array is the projection of a voxel to a pixel on the camera
+		//Third array is an array of booleans that flag if a voxel is or isnt occluded
+		for (int i = 0; i < voxels.size(); i++) {
+			voxelDistance.push_back(norm(Point2f{ (float)voxels[i]->x , (float)voxels[i]->y } - Point2f{ cameraLocation.x , cameraLocation.y }));
+			projections.push_back(voxels[i]->camera_projection[x]);
+			occluded.push_back(false);
+		}
 
-		//	//Calculates distance between a voxel and the camera
-		//	//double distance = sqrt((cameraLocation.x - voxels[i]->x) * (cameraLocation.x - voxels[i]->x)) + ((cameraLocation.y - voxels[i]->y) * (cameraLocation.y - voxels[i]->y)) + ((cameraLocation.z - voxels[i]->z) * (cameraLocation.z - voxels[i]->z));
-		//	double distance = sqrt((voxels[i]->x - cameraLocation.x) * (voxels[i]->x - cameraLocation.x)) + ((voxels[i]->y - cameraLocation.y) * (voxels[i]->y - cameraLocation.y)) + ((voxels[i]->z - cameraLocation.z) * (voxels[i]->z - cameraLocation.z));
+		//By comparing all voxels to each other, we determine that a voxel is not occluded if
+		//there is already a voxel occupying the same pixel and the distance of the current voxel is closer.
+		//Also the voxel has to be from a different label to be not occluded (occlusion is only between people and not voxels themselves)
+		for (int i = 0; i < voxels.size(); i++) {
+			double distance = norm(Point2f{ (float)voxels[i]->x , (float)voxels[i]->y } - Point2f{ cameraLocation.x , cameraLocation.y });
 
-		//	//Replaces a tuple if there was already a voxel mapped to the pixel and the new voxel's distance is shorter
-		//	for (tuple<Point, double> & tup : occlusion)
-		//	{
-		//		if (get<0>(tup) == voxels[i]->camera_projection[x] && voxels[i]->valid_camera_projection[x]) {
-		//			if (get<1>(tup) > distance) {
-		//				get<1>(tup) = distance;
-		//				tupleFound = true;
-		//			}
-		//		}
-		//	}
-		//	//Adds the voxel to the list if no previous voxel was mapped to the pixel
-		//	if (!tupleFound) {
-		//		occlusion.push_back(tuple<Point, double>(voxels[i]->camera_projection[x], distance));
-		//		tupleFound = false;
-		//	}
-		//}
+			for (int j = 0; j < voxels.size(); j++) {
+				if (projections[j] == voxels[i]->camera_projection[x] && voxelDistance[j] < distance && bestLabels.at<uchar>(i, 0) != bestLabels.at<uchar>(j, 0)) {
+					occluded[i] = true;
+				}
+			}
+		}
 
 		//Color each voxel based on if it is or isnt occluded for a camera
 		for (int i = 0; i < voxels.size(); i++)
 		{
-			voxels[i]->color[0] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2];
-			voxels[i]->color[1] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1];
-			voxels[i]->color[2] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0];
-
-
-			//if (temp[i] != '\0' /*&& voxels[i]->valid_camera_projection[x]*/)
-			//{
-			//	/*printf("Red value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2]);
-			//	printf("Green value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1]);
-			//	printf("Blue value: %u \n", image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0]);*/
-
-			//	double distance = sqrt((voxels[i]->x - cameraLocation.x) * (voxels[i]->x - cameraLocation.x)) + ((voxels[i]->y - cameraLocation.y) * (voxels[i]->y - cameraLocation.y)) + ((voxels[i]->z - cameraLocation.z) * (voxels[i]->z - cameraLocation.z));
-			//	//Check if the current voxel is the closest voxel (determined in previous for loop)
-			//	if (find(occlusion.begin(), occlusion.end(), tuple<Point, double>(voxels[i]->camera_projection[x], distance)) != occlusion.end()) {
-			//		voxels[i]->color[0] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2];
-			//		voxels[i]->color[1] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1];
-			//		voxels[i]->color[2] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0];
-			//	}
-			//}
+			if (voxels[i]->valid_camera_projection[x] && !occluded[i])
+			{
+					voxels[i]->color[0] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[2];
+					voxels[i]->color[1] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[1];
+					voxels[i]->color[2] = image.at<Vec3b>(voxels[i]->camera_projection[x].y, voxels[i]->camera_projection[x].x)[0];
+			}
 		}
 	}
-	////Calculates the means of a label
+	
 	uint counter1 = 0;;
 	uint counter2 = 0;
 	uint counter3 = 0;
@@ -1017,30 +1008,39 @@ void Glut::cluster() {
 	Scalar person2 = { 0, 0, 0 };
 	Scalar person3 = { 0, 0, 0 };
 	Scalar person4 = { 0, 0, 0 };
+	//Calculates the means of a label
 	for (int i = 0; i < voxels.size(); i++) {
 		if (bestLabels.at<uchar>(i, 0) == 0) {
-			counter1++;
-			person1[0] += voxels[i]->color[0];
-			person1[1] += voxels[i]->color[1];
-			person1[2] += voxels[i]->color[2];
+			if (voxels[i]->color[0] > 15 && voxels[i]->color[1] > 15 && voxels[i]->color[2] > 15) {
+				counter1++;
+				person1[0] += voxels[i]->color[0];
+				person1[1] += voxels[i]->color[1];
+				person1[2] += voxels[i]->color[2];
+			}
 		}
 		if (bestLabels.at<uchar>(i, 0) == 1) {
-			counter2++;
-			person2[0] += voxels[i]->color[0];
-			person2[1] += voxels[i]->color[1];
-			person2[2] += voxels[i]->color[2];
+			if (voxels[i]->color[0] > 15 && voxels[i]->color[1] > 15 && voxels[i]->color[2] > 15) {
+				counter2++;
+				person2[0] += voxels[i]->color[0];
+				person2[1] += voxels[i]->color[1];
+				person2[2] += voxels[i]->color[2];
+			}
 		}
 		if (bestLabels.at<uchar>(i, 0) == 2) {
-			counter3++;
-			person3[0] += voxels[i]->color[0];
-			person3[1] += voxels[i]->color[1];
-			person3[2] += voxels[i]->color[2];
+			if (voxels[i]->color[0] > 15 && voxels[i]->color[1] > 15 && voxels[i]->color[2] > 15) {
+				counter3++;
+				person3[0] += voxels[i]->color[0];
+				person3[1] += voxels[i]->color[1];
+				person3[2] += voxels[i]->color[2];
+			}
 		}
 		if (bestLabels.at<uchar>(i, 0) == 3) {
-			counter4++;
-			person4[0] += voxels[i]->color[0];
-			person4[1] += voxels[i]->color[1];
-			person4[2] += voxels[i]->color[2];
+			if (voxels[i]->color[0] > 15 && voxels[i]->color[1] > 15 && voxels[i]->color[2] > 15) {
+				counter4++;
+				person4[0] += voxels[i]->color[0];
+				person4[1] += voxels[i]->color[1];
+				person4[2] += voxels[i]->color[2];
+			}
 		}
 	}
 	//Turns voxel corresponding to one label into a single color
@@ -1066,6 +1066,7 @@ void Glut::cluster() {
 			voxels[i]->color[2] = person4[2] / counter4;;
 		}
 	}
+	
 	//Set the new (color) values of the voxels
 	m_Glut->getScene3d().getReconstructor().setVisibleVoxels(voxels);
 }
